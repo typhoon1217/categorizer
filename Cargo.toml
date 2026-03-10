@@ -1,0 +1,23 @@
+[package]
+name = "categorizer"
+version = "0.1.0"
+edition = "2021"
+description = "Fast manual file categorizer with image preview"
+
+[[bin]]
+name = "categorizer"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.28"
+egui = "0.28"
+egui_extras = { version = "0.28", features = ["image", "svg"] }
+image = { version = "0.25", default-features = false, features = [
+    "jpeg", "png", "gif", "bmp", "webp", "tiff", "ico"
+] }
+rfd = "0.14"
+
+[profile.release]
+opt-level = 3
+strip = true
+lto = true

@@ -1,3 +1,4 @@
+mod files;
 mod history;
 
 fn main() {

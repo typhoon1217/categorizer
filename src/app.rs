@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use egui::TextureHandle;
 use crate::history::UndoStack;
 
@@ -52,16 +52,6 @@ impl App {
         self.files.len()
     }
 
-    /// Total files processed so far (approximate: moved + skipped history).
-    pub fn total_processed(&self) -> usize {
-        self.history.len()
-    }
-
-    /// Reload subdirectories from disk (call after opening a new folder).
-    pub fn refresh_subdirs(&mut self) {
-        self.subdirs = crate::files::scan_subdirs(&self.folder).unwrap_or_default();
-    }
-
     /// Remove current file from queue and advance. Handles end-of-queue.
     /// Returns the removed file path.
     pub fn remove_current(&mut self) -> Option<PathBuf> {
@@ -83,7 +73,7 @@ impl App {
     }
 
     /// Move current file to dest_subdir. Records in undo history.
-    pub fn move_current(&mut self, dest_dir: &PathBuf) -> Result<(), String> {
+    pub fn move_current(&mut self, dest_dir: &Path) -> Result<(), String> {
         let src = match self.current_file() {
             Some(f) => f.clone(),
             None => return Err("No file to move".into()),

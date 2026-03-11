@@ -40,6 +40,11 @@ pub fn render(app: &mut App, ctx: &Context) {
         render_keymap_editor(app, ctx);
     }
 
+    // New folder popup
+    if app.show_new_folder_popup {
+        render_new_folder_popup(app, ctx);
+    }
+
     // Central image/preview panel
     egui::CentralPanel::default().show(ctx, |ui| {
         render_preview(app, ui, ctx);
@@ -86,6 +91,14 @@ fn render_sidebar(app: &mut App, ui: &mut egui::Ui) {
                     }
                 }
             });
+    }
+
+    // New folder button
+    let nf_label = format!("[{}] 📁+ New folder", app.keymap.new_folder.label);
+    if ui.button(nf_label).clicked() {
+        app.show_new_folder_popup = true;
+        app.new_folder_name.clear();
+        app.new_folder_error = None;
     }
 
     ui.separator();
@@ -238,6 +251,11 @@ fn file_icon_and_size(path: &std::path::Path) -> (&'static str, u64) {
 }
 
 fn handle_keyboard(app: &mut App, ctx: &Context) {
+    // While new folder popup is open, don't process normal shortcuts
+    if app.show_new_folder_popup {
+        return;
+    }
+
     // In listening mode, consume keypresses for rebinding
     if app.listening_bind.is_some() {
         let mut captured = None;
@@ -290,6 +308,7 @@ fn handle_keyboard(app: &mut App, ctx: &Context) {
                             }
                             BindTarget::Skip => app.keymap.skip = bind,
                             BindTarget::Undo => app.keymap.undo = bind,
+                            BindTarget::NewFolder => app.keymap.new_folder = bind,
                         }
                         if let Err(e) = app.keymap.save() {
                             app.status_message = Some(e);
@@ -333,12 +352,77 @@ fn handle_keyboard(app: &mut App, ctx: &Context) {
             if let Err(e) = app.undo() {
                 app.status_message = Some(e);
             }
+            return;
+        }
+
+        // New folder
+        if i.key_pressed(app.keymap.new_folder.key)
+            && mods_match(i.modifiers, app.keymap.new_folder.modifiers)
+        {
+            app.show_new_folder_popup = true;
+            app.new_folder_name.clear();
+            app.new_folder_error = None;
         }
     });
 }
 
 fn mods_match(actual: egui::Modifiers, expected: egui::Modifiers) -> bool {
     actual.ctrl == expected.ctrl && actual.shift == expected.shift && actual.alt == expected.alt
+}
+
+fn render_new_folder_popup(app: &mut App, ctx: &Context) {
+    let mut open = true;
+    egui::Window::new("New folder")
+        .open(&mut open)
+        .resizable(false)
+        .collapsible(false)
+        .default_width(250.0)
+        .show(ctx, |ui| {
+            ui.label("Folder name:");
+            let response = ui.text_edit_singleline(&mut app.new_folder_name);
+            // Auto-focus on first frame
+            response.request_focus();
+
+            if let Some(err) = &app.new_folder_error {
+                ui.colored_label(Color32::RED, err.as_str());
+            }
+
+            ui.horizontal(|ui| {
+                if ui.button("Create").clicked()
+                    || (response.lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                {
+                    match app.create_subfolder(&app.new_folder_name.clone()) {
+                        Ok(()) => {
+                            app.show_new_folder_popup = false;
+                            app.new_folder_name.clear();
+                            app.new_folder_error = None;
+                        }
+                        Err(e) => {
+                            app.new_folder_error = Some(e);
+                        }
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    app.show_new_folder_popup = false;
+                    app.new_folder_name.clear();
+                    app.new_folder_error = None;
+                }
+            });
+        });
+    if !open {
+        app.show_new_folder_popup = false;
+        app.new_folder_name.clear();
+        app.new_folder_error = None;
+    }
+    // Close on Escape
+    ctx.input(|i| {
+        if i.key_pressed(egui::Key::Escape) {
+            app.show_new_folder_popup = false;
+            app.new_folder_name.clear();
+            app.new_folder_error = None;
+        }
+    });
 }
 
 fn render_keymap_editor(app: &mut App, ctx: &Context) {
@@ -434,6 +518,30 @@ fn render_keymap_editor(app: &mut App, ctx: &Context) {
                             app.status_message = None;
                         }
                         ui.label("↩ Undo");
+                    });
+
+                    // New folder binding
+                    let is_listening_nf = app.listening_bind == Some(BindTarget::NewFolder);
+                    let nf_text = if is_listening_nf {
+                        "Press a key...".to_string()
+                    } else {
+                        app.keymap.new_folder.label.clone()
+                    };
+                    ui.horizontal(|ui| {
+                        let btn = egui::Button::new(
+                            RichText::new(&nf_text).monospace(),
+                        )
+                        .min_size(egui::vec2(90.0, 0.0));
+                        let btn = if is_listening_nf {
+                            btn.fill(Color32::from_rgb(60, 60, 120))
+                        } else {
+                            btn
+                        };
+                        if ui.add(btn).clicked() {
+                            app.listening_bind = Some(BindTarget::NewFolder);
+                            app.status_message = None;
+                        }
+                        ui.label("📁+ New folder");
                     });
                 });
 

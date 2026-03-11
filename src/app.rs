@@ -27,6 +27,9 @@ pub struct App {
     pub keymap: Keymap,
     pub show_keymap_editor: bool,
     pub listening_bind: Option<BindTarget>,
+    pub show_new_folder_popup: bool,
+    pub new_folder_name: String,
+    pub new_folder_error: Option<String>,
 }
 
 impl App {
@@ -46,6 +49,9 @@ impl App {
             keymap: Keymap::load(),
             show_keymap_editor: false,
             listening_bind: None,
+            show_new_folder_popup: false,
+            new_folder_name: String::new(),
+            new_folder_error: None,
         })
     }
 
@@ -119,6 +125,19 @@ impl App {
         Ok(())
     }
 
+    /// Create a new subfolder in the current folder.
+    pub fn create_subfolder(&mut self, name: &str) -> Result<(), String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err("Folder name cannot be empty".into());
+        }
+        let path = self.folder.join(trimmed);
+        std::fs::create_dir(&path).map_err(|e| format!("Failed to create folder: {e}"))?;
+        self.subdirs =
+            crate::files::scan_subdirs(&self.folder).unwrap_or_else(|_| self.subdirs.clone());
+        Ok(())
+    }
+
     /// Open a new folder. Resets file state but preserves keymap settings.
     pub fn open_folder(&mut self, new_folder: PathBuf) {
         let keymap = std::mem::take(&mut self.keymap);
@@ -144,5 +163,67 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         crate::ui::render(self, ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn setup_app() -> (TempDir, App) {
+        let tmp = TempDir::new().unwrap();
+        // Create a dummy file so the app has something to work with
+        std::fs::write(tmp.path().join("test.txt"), "hello").unwrap();
+        let app = App::new(tmp.path().to_path_buf()).unwrap();
+        (tmp, app)
+    }
+
+    #[test]
+    fn test_create_subfolder() {
+        let (tmp, mut app) = setup_app();
+        assert!(app.subdirs.is_empty());
+
+        app.create_subfolder("photos").unwrap();
+
+        assert!(tmp.path().join("photos").is_dir());
+        assert_eq!(app.subdirs.len(), 1);
+        assert_eq!(
+            app.subdirs[0].file_name().unwrap().to_str().unwrap(),
+            "photos"
+        );
+    }
+
+    #[test]
+    fn test_create_subfolder_duplicate() {
+        let (_tmp, mut app) = setup_app();
+        app.create_subfolder("photos").unwrap();
+
+        let result = app.create_subfolder("photos");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to create folder"));
+    }
+
+    #[test]
+    fn test_create_subfolder_empty_name() {
+        let (_tmp, mut app) = setup_app();
+        let result = app.create_subfolder("   ");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Folder name cannot be empty");
+    }
+
+    #[test]
+    fn test_create_subfolder_sorted() {
+        let (_tmp, mut app) = setup_app();
+        app.create_subfolder("zebra").unwrap();
+        app.create_subfolder("alpha").unwrap();
+        app.create_subfolder("middle").unwrap();
+
+        let names: Vec<_> = app
+            .subdirs
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(names, vec!["alpha", "middle", "zebra"]);
     }
 }

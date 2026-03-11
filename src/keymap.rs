@@ -16,6 +16,7 @@ pub struct Keymap {
     pub category_keys: Vec<KeyBind>,
     pub skip: KeyBind,
     pub undo: KeyBind,
+    pub new_folder: KeyBind,
 }
 
 /// Which binding the user is currently remapping.
@@ -24,6 +25,7 @@ pub enum BindTarget {
     Category(usize),
     Skip,
     Undo,
+    NewFolder,
 }
 
 impl Default for Keymap {
@@ -99,6 +101,11 @@ impl Default for Keymap {
                 modifiers: Modifiers::CTRL,
                 label: "Ctrl+Z".to_string(),
             },
+            new_folder: KeyBind {
+                key: egui::Key::N,
+                modifiers: Modifiers::CTRL,
+                label: "Ctrl+N".to_string(),
+            },
         }
     }
 }
@@ -165,6 +172,13 @@ impl Keymap {
             && exclude != Some(&BindTarget::Undo)
         {
             return Some("Undo".to_string());
+        }
+        // Check new_folder
+        if self.new_folder.key == key
+            && mods_equal(self.new_folder.modifiers, modifiers)
+            && exclude != Some(&BindTarget::NewFolder)
+        {
+            return Some("New folder".to_string());
         }
         None
     }
@@ -284,6 +298,8 @@ mod tests {
         assert_eq!(km.skip.modifiers, Modifiers::NONE);
         assert_eq!(km.undo.key, egui::Key::Z);
         assert!(km.undo.modifiers.ctrl);
+        assert_eq!(km.new_folder.key, egui::Key::N);
+        assert!(km.new_folder.modifiers.ctrl);
     }
 
     #[test]
@@ -324,6 +340,19 @@ mod tests {
         // But with all 33 active, Q does conflict
         let conflict = km.has_conflict(egui::Key::Q, Modifiers::NONE, None, 33);
         assert!(conflict.is_some());
+
+        // Ctrl+N is bound to new_folder
+        let conflict = km.has_conflict(egui::Key::N, Modifiers::CTRL, None, 33);
+        assert_eq!(conflict, Some("New folder".to_string()));
+
+        // Excluding new_folder should return None for Ctrl+N
+        let conflict = km.has_conflict(
+            egui::Key::N,
+            Modifiers::CTRL,
+            Some(&BindTarget::NewFolder),
+            33,
+        );
+        assert_eq!(conflict, None);
     }
 
     #[test]

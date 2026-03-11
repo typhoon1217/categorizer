@@ -1,6 +1,7 @@
 mod app;
 mod files;
 mod history;
+mod keymap;
 mod ui;
 
 use std::path::PathBuf;

@@ -1,5 +1,6 @@
 use egui::{Context, RichText, Color32};
 use crate::app::App;
+use crate::keymap::{self, BindTarget};
 
 pub fn render(app: &mut App, ctx: &Context) {
     handle_keyboard(app, ctx);
@@ -11,6 +12,10 @@ pub fn render(app: &mut App, ctx: &Context) {
                 if let Some(path) = rfd::FileDialog::new().pick_folder() {
                     app.open_folder(path);
                 }
+            }
+            if ui.button("⚙ Keybindings").clicked() {
+                app.show_keymap_editor = !app.show_keymap_editor;
+                app.listening_bind = None;
             }
             ui.separator();
             ui.label(format!("{}", app.folder.display()));
@@ -29,6 +34,11 @@ pub fn render(app: &mut App, ctx: &Context) {
         .show(ctx, |ui| {
             render_sidebar(app, ui);
         });
+
+    // Keymap editor overlay
+    if app.show_keymap_editor {
+        render_keymap_editor(app, ctx);
+    }
 
     // Central image/preview panel
     egui::CentralPanel::default().show(ctx, |ui| {
@@ -63,10 +73,11 @@ fn render_sidebar(app: &mut App, ui: &mut egui::Ui) {
             .show(ui, |ui: &mut egui::Ui| {
                 let subdirs = app.subdirs.clone();
                 for (i, dir) in subdirs.iter().enumerate() {
-                    let label = if i < 9 {
-                        format!("[{}] 📁 {}", i + 1, dir.file_name().unwrap_or_default().to_string_lossy())
+                    let dir_name = dir.file_name().unwrap_or_default().to_string_lossy();
+                    let label = if let Some(bind) = app.keymap.category_keys.get(i) {
+                        format!("[{}] 📁 {}", bind.label, dir_name)
                     } else {
-                        format!("    📁 {}", dir.file_name().unwrap_or_default().to_string_lossy())
+                        format!("    📁 {}", dir_name)
                     };
                     if ui.button(label).clicked() && app.current_file().is_some() {
                         if let Err(e) = app.move_current(&dir.clone()) {
@@ -87,10 +98,12 @@ fn render_sidebar(app: &mut App, ui: &mut egui::Ui) {
 
     // Skip + Undo buttons
     ui.horizontal(|ui| {
-        if ui.button("[S] ⏭ Skip").clicked() {
+        let skip_label = format!("[{}] ⏭ Skip", app.keymap.skip.label);
+        if ui.button(skip_label).clicked() {
             app.skip_current();
         }
-        let undo_btn = egui::Button::new("[Ctrl+Z] ↩ Undo");
+        let undo_label = format!("[{}] ↩ Undo", app.keymap.undo.label);
+        let undo_btn = egui::Button::new(undo_label);
         if ui
             .add_enabled(!app.history.is_empty(), undo_btn)
             .clicked()
@@ -225,42 +238,218 @@ fn file_icon_and_size(path: &std::path::Path) -> (&'static str, u64) {
 }
 
 fn handle_keyboard(app: &mut App, ctx: &Context) {
+    // In listening mode, consume keypresses for rebinding
+    if app.listening_bind.is_some() {
+        let mut captured = None;
+        ctx.input(|i| {
+            // Escape cancels listening
+            if i.key_pressed(egui::Key::Escape) {
+                captured = Some(None); // Signal cancel
+                return;
+            }
+            for event in &i.events {
+                if let egui::Event::Key {
+                    key, pressed: true, modifiers, ..
+                } = event
+                {
+                    captured = Some(Some((*key, *modifiers)));
+                    break;
+                }
+            }
+        });
+        if let Some(result) = captured {
+            match result {
+                None => {
+                    // Escape pressed — cancel
+                    app.listening_bind = None;
+                }
+                Some((key, modifiers)) => {
+                    let mods = egui::Modifiers {
+                        alt: modifiers.alt,
+                        ctrl: modifiers.ctrl,
+                        shift: modifiers.shift,
+                        mac_cmd: false,
+                        command: false,
+                    };
+                    let target = app.listening_bind.clone().unwrap();
+                    if let Some(conflict) = app.keymap.has_conflict(key, mods, Some(&target)) {
+                        app.status_message =
+                            Some(format!("Key already bound to {conflict}"));
+                    } else {
+                        let label = keymap::format_key_label(key, mods);
+                        let bind = keymap::KeyBind {
+                            key,
+                            modifiers: mods,
+                            label,
+                        };
+                        match &target {
+                            BindTarget::Category(idx) => {
+                                if let Some(slot) = app.keymap.category_keys.get_mut(*idx) {
+                                    *slot = bind;
+                                }
+                            }
+                            BindTarget::Skip => app.keymap.skip = bind,
+                            BindTarget::Undo => app.keymap.undo = bind,
+                        }
+                        if let Err(e) = app.keymap.save() {
+                            app.status_message = Some(e);
+                        }
+                    }
+                    app.listening_bind = None;
+                }
+            }
+        }
+        return; // Don't process normal shortcuts while listening
+    }
+
+    // Normal keyboard handling — driven by keymap
     ctx.input(|i| {
-        // Number keys 1–9: move to Nth category
-        for n in 1usize..=9 {
-            let key = match n {
-                1 => egui::Key::Num1,
-                2 => egui::Key::Num2,
-                3 => egui::Key::Num3,
-                4 => egui::Key::Num4,
-                5 => egui::Key::Num5,
-                6 => egui::Key::Num6,
-                7 => egui::Key::Num7,
-                8 => egui::Key::Num8,
-                9 => egui::Key::Num9,
-                _ => unreachable!(),
-            };
-            if i.key_pressed(key) {
-                if let Some(dir) = app.subdirs.get(n - 1).cloned() {
+        // Category keys
+        let num_cats = app.subdirs.len().min(app.keymap.category_keys.len());
+        for idx in 0..num_cats {
+            let bind = &app.keymap.category_keys[idx];
+            if i.key_pressed(bind.key) && mods_match(i.modifiers, bind.modifiers) {
+                if let Some(dir) = app.subdirs.get(idx).cloned() {
                     if let Err(e) = app.move_current(&dir) {
                         app.status_message = Some(e);
                     }
                 }
+                return;
             }
         }
 
-        // S: skip
-        if i.key_pressed(egui::Key::S) {
+        // Skip
+        if i.key_pressed(app.keymap.skip.key)
+            && mods_match(i.modifiers, app.keymap.skip.modifiers)
+        {
             app.skip_current();
+            return;
         }
 
-        // Ctrl+Z: undo
-        if i.key_pressed(egui::Key::Z) && i.modifiers.ctrl {
+        // Undo
+        if i.key_pressed(app.keymap.undo.key)
+            && mods_match(i.modifiers, app.keymap.undo.modifiers)
+        {
             if let Err(e) = app.undo() {
                 app.status_message = Some(e);
             }
         }
     });
+}
+
+fn mods_match(actual: egui::Modifiers, expected: egui::Modifiers) -> bool {
+    actual.ctrl == expected.ctrl && actual.shift == expected.shift && actual.alt == expected.alt
+}
+
+fn render_keymap_editor(app: &mut App, ctx: &Context) {
+    let mut open = app.show_keymap_editor;
+    egui::Window::new("Keybindings")
+        .open(&mut open)
+        .resizable(true)
+        .default_width(350.0)
+        .show(ctx, |ui| {
+            ui.label("Click a binding to remap it. Press Escape to cancel.");
+            ui.separator();
+
+            egui::ScrollArea::vertical()
+                .max_height(400.0)
+                .show(ui, |ui| {
+                    // Category bindings
+                    let num_cats = app.subdirs.len().min(app.keymap.category_keys.len());
+                    for i in 0..num_cats {
+                        let dir_name = app
+                            .subdirs
+                            .get(i)
+                            .and_then(|d| d.file_name().map(|n| n.to_string_lossy().to_string()))
+                            .unwrap_or_else(|| format!("Category {}", i + 1));
+                        let is_listening = app.listening_bind == Some(BindTarget::Category(i));
+                        let btn_text = if is_listening {
+                            "Press a key...".to_string()
+                        } else {
+                            app.keymap.category_keys[i].label.clone()
+                        };
+                        ui.horizontal(|ui| {
+                            let btn = egui::Button::new(
+                                RichText::new(&btn_text).monospace(),
+                            )
+                            .min_size(egui::vec2(90.0, 0.0));
+                            let btn = if is_listening {
+                                btn.fill(Color32::from_rgb(60, 60, 120))
+                            } else {
+                                btn
+                            };
+                            if ui.add(btn).clicked() {
+                                app.listening_bind = Some(BindTarget::Category(i));
+                                app.status_message = None;
+                            }
+                            ui.label(format!("📁 {dir_name}"));
+                        });
+                    }
+
+                    ui.separator();
+
+                    // Skip binding
+                    let is_listening_skip = app.listening_bind == Some(BindTarget::Skip);
+                    let skip_text = if is_listening_skip {
+                        "Press a key...".to_string()
+                    } else {
+                        app.keymap.skip.label.clone()
+                    };
+                    ui.horizontal(|ui| {
+                        let btn = egui::Button::new(
+                            RichText::new(&skip_text).monospace(),
+                        )
+                        .min_size(egui::vec2(90.0, 0.0));
+                        let btn = if is_listening_skip {
+                            btn.fill(Color32::from_rgb(60, 60, 120))
+                        } else {
+                            btn
+                        };
+                        if ui.add(btn).clicked() {
+                            app.listening_bind = Some(BindTarget::Skip);
+                            app.status_message = None;
+                        }
+                        ui.label("⏭ Skip");
+                    });
+
+                    // Undo binding
+                    let is_listening_undo = app.listening_bind == Some(BindTarget::Undo);
+                    let undo_text = if is_listening_undo {
+                        "Press a key...".to_string()
+                    } else {
+                        app.keymap.undo.label.clone()
+                    };
+                    ui.horizontal(|ui| {
+                        let btn = egui::Button::new(
+                            RichText::new(&undo_text).monospace(),
+                        )
+                        .min_size(egui::vec2(90.0, 0.0));
+                        let btn = if is_listening_undo {
+                            btn.fill(Color32::from_rgb(60, 60, 120))
+                        } else {
+                            btn
+                        };
+                        if ui.add(btn).clicked() {
+                            app.listening_bind = Some(BindTarget::Undo);
+                            app.status_message = None;
+                        }
+                        ui.label("↩ Undo");
+                    });
+                });
+
+            ui.separator();
+            if ui.button("Reset to defaults").clicked() {
+                app.keymap = keymap::Keymap::default();
+                app.listening_bind = None;
+                if let Err(e) = app.keymap.save() {
+                    app.status_message = Some(e);
+                }
+            }
+        });
+    app.show_keymap_editor = open;
+    if !open {
+        app.listening_bind = None;
+    }
 }
 
 fn format_size(bytes: u64) -> String {

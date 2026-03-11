@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use egui::TextureHandle;
 use crate::history::UndoStack;
+use crate::keymap::{BindTarget, Keymap};
 
 const UNDO_CAPACITY: usize = 20;
 
@@ -23,6 +24,9 @@ pub struct App {
     pub texture_cache: Option<(PathBuf, TextureHandle)>,
     pub file_view: FileView,
     pub status_message: Option<String>, // transient error/info display
+    pub keymap: Keymap,
+    pub show_keymap_editor: bool,
+    pub listening_bind: Option<BindTarget>,
 }
 
 impl App {
@@ -39,6 +43,9 @@ impl App {
             texture_cache: None,
             file_view: FileView::Loading,
             status_message: None,
+            keymap: Keymap::load(),
+            show_keymap_editor: false,
+            listening_bind: None,
         })
     }
 
@@ -112,11 +119,24 @@ impl App {
         Ok(())
     }
 
-    /// Open a new folder. Resets all state.
+    /// Open a new folder. Resets file state but preserves keymap settings.
     pub fn open_folder(&mut self, new_folder: PathBuf) {
+        let keymap = std::mem::take(&mut self.keymap);
+        let show_keymap_editor = self.show_keymap_editor;
+        let listening_bind = self.listening_bind.take();
         match Self::new(new_folder) {
-            Ok(new_app) => *self = new_app,
-            Err(e) => self.status_message = Some(format!("Failed to open folder: {e}")),
+            Ok(mut new_app) => {
+                new_app.keymap = keymap;
+                new_app.show_keymap_editor = show_keymap_editor;
+                new_app.listening_bind = listening_bind;
+                *self = new_app;
+            }
+            Err(e) => {
+                self.keymap = keymap;
+                self.show_keymap_editor = show_keymap_editor;
+                self.listening_bind = listening_bind;
+                self.status_message = Some(format!("Failed to open folder: {e}"));
+            }
         }
     }
 }

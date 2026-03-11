@@ -1,7 +1,13 @@
 # categorizer
 
+[![CI](https://github.com/typhoon1217/categorizer/actions/workflows/ci.yml/badge.svg)](https://github.com/typhoon1217/categorizer/actions/workflows/ci.yml)
+
 Fast manual file categorizer with image preview. Open a folder, see each file
 one at a time, press a number key to move it into a subcategory.
+
+## Download
+
+Pre-built binaries for Linux, macOS (Intel + Apple Silicon), and Windows are available on the [Releases](https://github.com/typhoon1217/categorizer/releases) page.
 
 ## Features
 

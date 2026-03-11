@@ -272,7 +272,7 @@ fn handle_keyboard(app: &mut App, ctx: &Context) {
                         command: false,
                     };
                     let target = app.listening_bind.clone().unwrap();
-                    if let Some(conflict) = app.keymap.has_conflict(key, mods, Some(&target)) {
+                    if let Some(conflict) = app.keymap.has_conflict(key, mods, Some(&target), app.subdirs.len()) {
                         app.status_message =
                             Some(format!("Key already bound to {conflict}"));
                     } else {

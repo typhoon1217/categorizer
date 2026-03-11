@@ -135,14 +135,16 @@ impl Keymap {
     /// Check if a key+modifiers combo is already bound to something.
     /// Returns the action name if a conflict is found.
     /// `exclude` lets you skip the binding currently being edited.
+    /// `active_categories` limits the check to only the first N category bindings.
     pub fn has_conflict(
         &self,
         key: egui::Key,
         modifiers: Modifiers,
         exclude: Option<&BindTarget>,
+        active_categories: usize,
     ) -> Option<String> {
-        // Check category keys
-        for (i, bind) in self.category_keys.iter().enumerate() {
+        // Check only active category keys
+        for (i, bind) in self.category_keys.iter().take(active_categories).enumerate() {
             if bind.key == key && mods_equal(bind.modifiers, modifiers) {
                 if exclude == Some(&BindTarget::Category(i)) {
                     continue;
@@ -296,25 +298,32 @@ mod tests {
     fn test_conflict_detection() {
         let km = Keymap::default();
         // Key "1" is bound to category 1
-        let conflict = km.has_conflict(egui::Key::Num1, Modifiers::NONE, None);
+        let conflict = km.has_conflict(egui::Key::Num1, Modifiers::NONE, None, 33);
         assert_eq!(conflict, Some("Category 1".to_string()));
 
         // Key "S" is bound to skip
-        let conflict = km.has_conflict(egui::Key::S, Modifiers::NONE, None);
+        let conflict = km.has_conflict(egui::Key::S, Modifiers::NONE, None, 33);
         assert_eq!(conflict, Some("Skip".to_string()));
 
         // Ctrl+Z is bound to undo
-        let conflict = km.has_conflict(egui::Key::Z, Modifiers::CTRL, None);
+        let conflict = km.has_conflict(egui::Key::Z, Modifiers::CTRL, None, 33);
         assert_eq!(conflict, Some("Undo".to_string()));
 
         // No conflict for unbound key
-        let conflict = km.has_conflict(egui::Key::F1, Modifiers::NONE, None);
+        let conflict = km.has_conflict(egui::Key::F1, Modifiers::NONE, None, 33);
         assert_eq!(conflict, None);
 
         // Excluding the conflicting binding should return None
         let conflict =
-            km.has_conflict(egui::Key::Num1, Modifiers::NONE, Some(&BindTarget::Category(0)));
+            km.has_conflict(egui::Key::Num1, Modifiers::NONE, Some(&BindTarget::Category(0)), 33);
         assert_eq!(conflict, None);
+
+        // With only 2 active categories, Q (category 26) should NOT conflict
+        let conflict = km.has_conflict(egui::Key::Q, Modifiers::NONE, None, 2);
+        assert_eq!(conflict, None);
+        // But with all 33 active, Q does conflict
+        let conflict = km.has_conflict(egui::Key::Q, Modifiers::NONE, None, 33);
+        assert!(conflict.is_some());
     }
 
     #[test]

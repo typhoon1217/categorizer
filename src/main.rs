@@ -1,5 +1,6 @@
 mod app;
 mod files;
+mod fonts;
 mod history;
 mod keymap;
 mod ui;
@@ -36,7 +37,10 @@ fn main() {
     eframe::run_native(
         "Categorizer",
         options,
-        Box::new(|_cc| Ok(Box::new(app))),
+        Box::new(|cc| {
+            fonts::configure_fonts(&cc.egui_ctx);
+            Ok(Box::new(app))
+        }),
     )
     .expect("failed to run eframe");
 }

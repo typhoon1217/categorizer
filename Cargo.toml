@@ -13,6 +13,7 @@ dirs = "5"
 eframe = "0.28"
 egui = { version = "0.28", features = ["serde"] }
 egui_extras = { version = "0.28", features = ["image", "svg"] }
+font-kit = "0.14.3"
 image = { version = "0.25", default-features = false, features = [
     "jpeg", "png", "gif", "bmp", "webp", "tiff", "ico"
 ] }

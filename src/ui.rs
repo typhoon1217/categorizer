@@ -1,6 +1,6 @@
 use egui::{Context, RichText, Color32};
 use crate::app::App;
-use crate::keymap::{self, BindTarget};
+use crate::keymap::{self, BindTarget, FolderBindings};
 
 pub fn render(app: &mut App, ctx: &Context) {
     handle_keyboard(app, ctx);
@@ -8,12 +8,14 @@ pub fn render(app: &mut App, ctx: &Context) {
     // Toolbar
     egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
         ui.horizontal(|ui| {
-            if ui.button("📂 Open folder…").clicked() {
+            let open_label = format!("[{}] 📂 Open folder…", app.keymap.open_folder.label);
+            if ui.button(open_label).clicked() {
                 if let Some(path) = rfd::FileDialog::new().pick_folder() {
                     app.open_folder(path);
                 }
             }
-            if ui.button("⚙ Keybindings").clicked() {
+            let kb_label = format!("[{}] ⚙ Keybindings", app.keymap.toggle_keybindings.label);
+            if ui.button(kb_label).clicked() {
                 app.show_keymap_editor = !app.show_keymap_editor;
                 app.listening_bind = None;
             }
@@ -77,9 +79,9 @@ fn render_sidebar(app: &mut App, ui: &mut egui::Ui) {
             .max_height(ui.available_height() - 80.0)
             .show(ui, |ui: &mut egui::Ui| {
                 let subdirs = app.subdirs.clone();
-                for (i, dir) in subdirs.iter().enumerate() {
+                for dir in &subdirs {
                     let dir_name = dir.file_name().unwrap_or_default().to_string_lossy();
-                    let label = if let Some(bind) = app.keymap.category_keys.get(i) {
+                    let label = if let Some(bind) = app.folder_bindings.get(&dir_name) {
                         format!("[{}] 📁 {}", bind.label, dir_name)
                     } else {
                         format!("    📁 {}", dir_name)
@@ -290,7 +292,7 @@ fn handle_keyboard(app: &mut App, ctx: &Context) {
                         command: false,
                     };
                     let target = app.listening_bind.clone().unwrap();
-                    if let Some(conflict) = app.keymap.has_conflict(key, mods, Some(&target), app.subdirs.len()) {
+                    if let Some(conflict) = app.keymap.has_conflict(key, mods, Some(&target), &app.folder_bindings) {
                         app.status_message =
                             Some(format!("Key already bound to {conflict}"));
                     } else {
@@ -301,17 +303,20 @@ fn handle_keyboard(app: &mut App, ctx: &Context) {
                             label,
                         };
                         match &target {
-                            BindTarget::Category(idx) => {
-                                if let Some(slot) = app.keymap.category_keys.get_mut(*idx) {
-                                    *slot = bind;
-                                }
+                            BindTarget::Category(name) => {
+                                app.folder_bindings.0.insert(name.clone(), bind);
+                                let _ = app.folder_bindings.save(&app.folder);
                             }
                             BindTarget::Skip => app.keymap.skip = bind,
                             BindTarget::Undo => app.keymap.undo = bind,
                             BindTarget::NewFolder => app.keymap.new_folder = bind,
+                            BindTarget::OpenFolder => app.keymap.open_folder = bind,
+                            BindTarget::ToggleKeybindings => app.keymap.toggle_keybindings = bind,
                         }
-                        if let Err(e) = app.keymap.save() {
-                            app.status_message = Some(e);
+                        if !matches!(&target, BindTarget::Category(_)) {
+                            if let Err(e) = app.keymap.save() {
+                                app.status_message = Some(e);
+                            }
                         }
                     }
                     app.listening_bind = None;
@@ -323,17 +328,16 @@ fn handle_keyboard(app: &mut App, ctx: &Context) {
 
     // Normal keyboard handling — driven by keymap
     ctx.input(|i| {
-        // Category keys
-        let num_cats = app.subdirs.len().min(app.keymap.category_keys.len());
-        for idx in 0..num_cats {
-            let bind = &app.keymap.category_keys[idx];
-            if i.key_pressed(bind.key) && mods_match(i.modifiers, bind.modifiers) {
-                if let Some(dir) = app.subdirs.get(idx).cloned() {
-                    if let Err(e) = app.move_current(&dir) {
+        // Category keys — iterate subdirs, look up by folder name
+        for dir in &app.subdirs.clone() {
+            let dir_name = dir.file_name().unwrap_or_default().to_string_lossy();
+            if let Some(bind) = app.folder_bindings.get(&dir_name) {
+                if i.key_pressed(bind.key) && mods_match(i.modifiers, bind.modifiers) {
+                    if let Err(e) = app.move_current(dir) {
                         app.status_message = Some(e);
                     }
+                    return;
                 }
-                return;
             }
         }
 
@@ -362,6 +366,25 @@ fn handle_keyboard(app: &mut App, ctx: &Context) {
             app.show_new_folder_popup = true;
             app.new_folder_name.clear();
             app.new_folder_error = None;
+            return;
+        }
+
+        // Open folder
+        if i.key_pressed(app.keymap.open_folder.key)
+            && mods_match(i.modifiers, app.keymap.open_folder.modifiers)
+        {
+            if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                app.open_folder(path);
+            }
+            return;
+        }
+
+        // Toggle keybindings
+        if i.key_pressed(app.keymap.toggle_keybindings.key)
+            && mods_match(i.modifiers, app.keymap.toggle_keybindings.modifiers)
+        {
+            app.show_keymap_editor = !app.show_keymap_editor;
+            app.listening_bind = None;
         }
     });
 }
@@ -372,6 +395,15 @@ fn mods_match(actual: egui::Modifiers, expected: egui::Modifiers) -> bool {
 
 fn render_new_folder_popup(app: &mut App, ctx: &Context) {
     let mut open = true;
+    let mut should_create = false;
+
+    // Check Enter key directly from ctx — fixes unreliable lost_focus pattern
+    ctx.input(|i| {
+        if i.key_pressed(egui::Key::Enter) {
+            should_create = true;
+        }
+    });
+
     egui::Window::new("New folder")
         .open(&mut open)
         .resizable(false)
@@ -388,20 +420,8 @@ fn render_new_folder_popup(app: &mut App, ctx: &Context) {
             }
 
             ui.horizontal(|ui| {
-                if ui.button("Create").clicked()
-                    || (response.lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                {
-                    match app.create_subfolder(&app.new_folder_name.clone()) {
-                        Ok(()) => {
-                            app.show_new_folder_popup = false;
-                            app.new_folder_name.clear();
-                            app.new_folder_error = None;
-                        }
-                        Err(e) => {
-                            app.new_folder_error = Some(e);
-                        }
-                    }
+                if ui.button("Create").clicked() {
+                    should_create = true;
                 }
                 if ui.button("Cancel").clicked() {
                     app.show_new_folder_popup = false;
@@ -410,6 +430,20 @@ fn render_new_folder_popup(app: &mut App, ctx: &Context) {
                 }
             });
         });
+
+    if should_create {
+        match app.create_subfolder(&app.new_folder_name.clone()) {
+            Ok(()) => {
+                app.show_new_folder_popup = false;
+                app.new_folder_name.clear();
+                app.new_folder_error = None;
+            }
+            Err(e) => {
+                app.new_folder_error = Some(e);
+            }
+        }
+    }
+
     if !open {
         app.show_new_folder_popup = false;
         app.new_folder_name.clear();
@@ -438,19 +472,24 @@ fn render_keymap_editor(app: &mut App, ctx: &Context) {
             egui::ScrollArea::vertical()
                 .max_height(400.0)
                 .show(ui, |ui| {
-                    // Category bindings
-                    let num_cats = app.subdirs.len().min(app.keymap.category_keys.len());
-                    for i in 0..num_cats {
-                        let dir_name = app
-                            .subdirs
-                            .get(i)
-                            .and_then(|d| d.file_name().map(|n| n.to_string_lossy().to_string()))
-                            .unwrap_or_else(|| format!("Category {}", i + 1));
-                        let is_listening = app.listening_bind == Some(BindTarget::Category(i));
+                    // --- Folders (local) section ---
+                    ui.heading(RichText::new("Folders (local)").size(13.0));
+                    ui.label(RichText::new("Per-folder bindings stored alongside your files").weak().size(11.0));
+                    ui.add_space(4.0);
+
+                    let subdirs = app.subdirs.clone();
+                    for dir in &subdirs {
+                        let dir_name = dir
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        let is_listening = app.listening_bind == Some(BindTarget::Category(dir_name.clone()));
                         let btn_text = if is_listening {
                             "Press a key...".to_string()
+                        } else if let Some(bind) = app.folder_bindings.get(&dir_name) {
+                            bind.label.clone()
                         } else {
-                            app.keymap.category_keys[i].label.clone()
+                            "—".to_string()
                         };
                         ui.horizontal(|ui| {
                             let btn = egui::Button::new(
@@ -463,92 +502,42 @@ fn render_keymap_editor(app: &mut App, ctx: &Context) {
                                 btn
                             };
                             if ui.add(btn).clicked() {
-                                app.listening_bind = Some(BindTarget::Category(i));
+                                app.listening_bind = Some(BindTarget::Category(dir_name.clone()));
                                 app.status_message = None;
                             }
                             ui.label(format!("📁 {dir_name}"));
                         });
                     }
 
+                    if subdirs.is_empty() {
+                        ui.colored_label(Color32::GRAY, "No subfolders yet");
+                    }
+
+                    ui.add_space(8.0);
                     ui.separator();
 
-                    // Skip binding
-                    let is_listening_skip = app.listening_bind == Some(BindTarget::Skip);
-                    let skip_text = if is_listening_skip {
-                        "Press a key...".to_string()
-                    } else {
-                        app.keymap.skip.label.clone()
-                    };
-                    ui.horizontal(|ui| {
-                        let btn = egui::Button::new(
-                            RichText::new(&skip_text).monospace(),
-                        )
-                        .min_size(egui::vec2(90.0, 0.0));
-                        let btn = if is_listening_skip {
-                            btn.fill(Color32::from_rgb(60, 60, 120))
-                        } else {
-                            btn
-                        };
-                        if ui.add(btn).clicked() {
-                            app.listening_bind = Some(BindTarget::Skip);
-                            app.status_message = None;
-                        }
-                        ui.label("⏭ Skip");
-                    });
+                    // --- Actions (global) section ---
+                    ui.heading(RichText::new("Actions (global)").size(13.0));
+                    ui.label(RichText::new("Stored in ~/.config/categorizer/keymap.json").weak().size(11.0));
+                    ui.add_space(4.0);
 
-                    // Undo binding
-                    let is_listening_undo = app.listening_bind == Some(BindTarget::Undo);
-                    let undo_text = if is_listening_undo {
-                        "Press a key...".to_string()
-                    } else {
-                        app.keymap.undo.label.clone()
-                    };
-                    ui.horizontal(|ui| {
-                        let btn = egui::Button::new(
-                            RichText::new(&undo_text).monospace(),
-                        )
-                        .min_size(egui::vec2(90.0, 0.0));
-                        let btn = if is_listening_undo {
-                            btn.fill(Color32::from_rgb(60, 60, 120))
-                        } else {
-                            btn
-                        };
-                        if ui.add(btn).clicked() {
-                            app.listening_bind = Some(BindTarget::Undo);
-                            app.status_message = None;
-                        }
-                        ui.label("↩ Undo");
-                    });
-
-                    // New folder binding
-                    let is_listening_nf = app.listening_bind == Some(BindTarget::NewFolder);
-                    let nf_text = if is_listening_nf {
-                        "Press a key...".to_string()
-                    } else {
-                        app.keymap.new_folder.label.clone()
-                    };
-                    ui.horizontal(|ui| {
-                        let btn = egui::Button::new(
-                            RichText::new(&nf_text).monospace(),
-                        )
-                        .min_size(egui::vec2(90.0, 0.0));
-                        let btn = if is_listening_nf {
-                            btn.fill(Color32::from_rgb(60, 60, 120))
-                        } else {
-                            btn
-                        };
-                        if ui.add(btn).clicked() {
-                            app.listening_bind = Some(BindTarget::NewFolder);
-                            app.status_message = None;
-                        }
-                        ui.label("📁+ New folder");
-                    });
+                    render_global_bind_row(ui, app, BindTarget::Skip, "⏭ Skip", &app.keymap.skip.label.clone());
+                    render_global_bind_row(ui, app, BindTarget::Undo, "↩ Undo", &app.keymap.undo.label.clone());
+                    render_global_bind_row(ui, app, BindTarget::NewFolder, "📁+ New folder", &app.keymap.new_folder.label.clone());
+                    render_global_bind_row(ui, app, BindTarget::OpenFolder, "📂 Open folder", &app.keymap.open_folder.label.clone());
+                    render_global_bind_row(ui, app, BindTarget::ToggleKeybindings, "⚙ Keybindings", &app.keymap.toggle_keybindings.label.clone());
                 });
 
             ui.separator();
             if ui.button("Reset to defaults").clicked() {
                 app.keymap = keymap::Keymap::default();
                 app.listening_bind = None;
+                // Delete local folder bindings and re-auto-assign
+                FolderBindings::delete(&app.folder);
+                let mut fb = FolderBindings::default();
+                fb.ensure_bound(&app.subdirs, &app.keymap);
+                let _ = fb.save(&app.folder);
+                app.folder_bindings = fb;
                 if let Err(e) = app.keymap.save() {
                     app.status_message = Some(e);
                 }
@@ -558,6 +547,31 @@ fn render_keymap_editor(app: &mut App, ctx: &Context) {
     if !open {
         app.listening_bind = None;
     }
+}
+
+fn render_global_bind_row(ui: &mut egui::Ui, app: &mut App, target: BindTarget, action_label: &str, current_label: &str) {
+    let is_listening = app.listening_bind == Some(target.clone());
+    let btn_text = if is_listening {
+        "Press a key...".to_string()
+    } else {
+        current_label.to_string()
+    };
+    ui.horizontal(|ui| {
+        let btn = egui::Button::new(
+            RichText::new(&btn_text).monospace(),
+        )
+        .min_size(egui::vec2(90.0, 0.0));
+        let btn = if is_listening {
+            btn.fill(Color32::from_rgb(60, 60, 120))
+        } else {
+            btn
+        };
+        if ui.add(btn).clicked() {
+            app.listening_bind = Some(target);
+            app.status_message = None;
+        }
+        ui.label(action_label);
+    });
 }
 
 fn format_size(bytes: u64) -> String {

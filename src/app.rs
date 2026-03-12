@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use egui::TextureHandle;
 use crate::history::UndoStack;
-use crate::keymap::{BindTarget, Keymap};
+use crate::keymap::{BindTarget, FolderBindings, Keymap};
 
 const UNDO_CAPACITY: usize = 20;
 
@@ -25,6 +25,7 @@ pub struct App {
     pub file_view: FileView,
     pub status_message: Option<String>, // transient error/info display
     pub keymap: Keymap,
+    pub folder_bindings: FolderBindings,
     pub show_keymap_editor: bool,
     pub listening_bind: Option<BindTarget>,
     pub show_new_folder_popup: bool,
@@ -36,6 +37,10 @@ impl App {
     pub fn new(folder: PathBuf) -> std::io::Result<Self> {
         let files = crate::files::scan_files(&folder)?;
         let subdirs = crate::files::scan_subdirs(&folder)?;
+        let keymap = Keymap::load();
+        let mut folder_bindings = FolderBindings::load(&folder);
+        folder_bindings.ensure_bound(&subdirs, &keymap);
+        let _ = folder_bindings.save(&folder);
         Ok(Self {
             folder,
             files,
@@ -46,7 +51,8 @@ impl App {
             texture_cache: None,
             file_view: FileView::Loading,
             status_message: None,
-            keymap: Keymap::load(),
+            keymap,
+            folder_bindings,
             show_keymap_editor: false,
             listening_bind: None,
             show_new_folder_popup: false,
@@ -126,6 +132,7 @@ impl App {
     }
 
     /// Create a new subfolder in the current folder.
+    /// Pushes to subdirs in sorted order and assigns a key binding.
     pub fn create_subfolder(&mut self, name: &str) -> Result<(), String> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
@@ -133,8 +140,20 @@ impl App {
         }
         let path = self.folder.join(trimmed);
         std::fs::create_dir(&path).map_err(|e| format!("Failed to create folder: {e}"))?;
-        self.subdirs =
-            crate::files::scan_subdirs(&self.folder).unwrap_or_else(|_| self.subdirs.clone());
+        // Insert in sorted position instead of rescanning
+        let insert_pos = self
+            .subdirs
+            .binary_search_by(|probe| {
+                probe
+                    .file_name()
+                    .unwrap_or_default()
+                    .cmp(path.file_name().unwrap_or_default())
+            })
+            .unwrap_or_else(|pos| pos);
+        self.subdirs.insert(insert_pos, path);
+        // Assign a key to the new folder
+        self.folder_bindings.assign_key(trimmed, &self.keymap);
+        let _ = self.folder_bindings.save(&self.folder);
         Ok(())
     }
 
@@ -192,6 +211,8 @@ mod tests {
             app.subdirs[0].file_name().unwrap().to_str().unwrap(),
             "photos"
         );
+        // Should have a binding
+        assert!(app.folder_bindings.get("photos").is_some());
     }
 
     #[test]
@@ -225,5 +246,33 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
             .collect();
         assert_eq!(names, vec!["alpha", "middle", "zebra"]);
+    }
+
+    #[test]
+    fn test_create_subfolder_preserves_existing_bindings() {
+        let (_tmp, mut app) = setup_app();
+        app.create_subfolder("alpha").unwrap();
+        app.create_subfolder("beta").unwrap();
+        let alpha_key = app.folder_bindings.get("alpha").unwrap().key;
+        let beta_key = app.folder_bindings.get("beta").unwrap().key;
+
+        // Adding a new folder between them shouldn't shift anything
+        app.create_subfolder("charlie").unwrap();
+        assert_eq!(app.folder_bindings.get("alpha").unwrap().key, alpha_key);
+        assert_eq!(app.folder_bindings.get("beta").unwrap().key, beta_key);
+        assert!(app.folder_bindings.get("charlie").is_some());
+    }
+
+    #[test]
+    fn test_folder_bindings_loaded_on_open() {
+        let (tmp, mut app) = setup_app();
+        // Create subdirs with bindings
+        app.create_subfolder("cats").unwrap();
+        app.create_subfolder("dogs").unwrap();
+        let cats_key = app.folder_bindings.get("cats").unwrap().key;
+
+        // Re-open same folder — bindings should persist
+        app.open_folder(tmp.path().to_path_buf());
+        assert_eq!(app.folder_bindings.get("cats").unwrap().key, cats_key);
     }
 }

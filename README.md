@@ -3,7 +3,7 @@
 [![CI](https://github.com/typhoon1217/categorizer/actions/workflows/ci.yml/badge.svg)](https://github.com/typhoon1217/categorizer/actions/workflows/ci.yml)
 
 Fast manual file categorizer with image preview. Open a folder, see each file
-one at a time, press a number key to move it into a subcategory.
+one at a time, press a key to move it into a subcategory.
 
 ## Download
 
@@ -14,10 +14,26 @@ Pre-built binaries for Linux, macOS (Intel + Apple Silicon), and Windows are ava
 - Image preview (jpg, jpeg, png, gif, bmp, webp, tiff, ico)
 - Text preview for .txt and .md files
 - Category buttons for every subdirectory in the current folder
-- Keyboard shortcuts: `1`–`9` to categorize, `S` to skip, `Ctrl+Z` to undo
+- **Named keybindings**: each folder gets its own persistent key — adding a new folder never shifts existing bindings
+- **Two-tier keymap**: global shortcuts stored in `~/.config/categorizer/keymap.json`, per-folder bindings stored in `<folder>/.categorizer-keys.json`
+- Fully remappable keyboard shortcuts via the built-in keybinding editor
+- Create new subfolders on-the-fly with `Ctrl+N`
 - 20-level undo history
 - Skip queue: skipped files reappear after all others are processed
 - Cross-platform (Linux, macOS, Windows)
+
+## Default Keybindings
+
+| Action | Default Key |
+|--------|------------|
+| Categorize to folder | `1`–`9`, `A`–`Y` (auto-assigned per folder) |
+| Skip | `S` |
+| Undo | `Ctrl+Z` |
+| New folder | `Ctrl+N` |
+| Open folder | `Ctrl+O` |
+| Toggle keybinding editor | `Ctrl+K` |
+
+All bindings can be remapped via the keybinding editor (`Ctrl+K`).
 
 ## Usage
 
@@ -46,16 +62,19 @@ cargo build --release
 
 1. Run `categorizer` pointing at a folder that contains files and subdirectories
 2. The app shows each file one at a time
-3. Press `1`–`9` to move the file to the corresponding subdirectory
+3. Press the assigned key to move the file to the corresponding subdirectory
 4. Press `S` to skip a file (it will reappear after all others)
 5. Press `Ctrl+Z` to undo the last move
-6. When all files are categorized, a completion screen is shown
+6. Press `Ctrl+N` to create a new subfolder (it gets the next available key automatically)
+7. Press `Ctrl+O` to open a different folder
+8. Press `Ctrl+K` to open the keybinding editor
+9. When all files are categorized, a completion screen is shown
 
 ## Layout
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ 📂 Open folder…                    file 12/47       │
+│ [Ctrl+O] 📂 Open folder…  [Ctrl+K] ⚙  file 12/47  │
 ├──────────────────────────────┬──────────────────────┤
 │                              │ photo_001.jpg        │
 │                              │ 2.3 MB               │

@@ -20,6 +20,7 @@ Pre-built binaries for Linux, macOS (Intel + Apple Silicon), and Windows are ava
 - Create new subfolders on-the-fly with `Ctrl+N`
 - 20-level undo history
 - Skip queue: skipped files reappear after all others are processed
+- Multilingual support (Korean, Chinese, Japanese) via automatic system font detection
 - Cross-platform (Linux, macOS, Windows)
 
 ## Default Keybindings

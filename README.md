@@ -18,7 +18,9 @@ Pre-built binaries for Linux, macOS (Intel + Apple Silicon), and Windows are ava
 - **Two-tier keymap**: global shortcuts stored in `~/.config/categorizer/keymap.json`, per-folder bindings stored in `<folder>/.categorizer-keys.json`
 - Fully remappable keyboard shortcuts via the built-in keybinding editor
 - Create new subfolders on-the-fly with `Ctrl+N`
-- 20-level undo history
+- **History panel**: resizable bottom bar with scrollable thumbnail strip showing moved files and their destination folders (`Ctrl+H`)
+- **Image border**: yellow outline around previewed images to distinguish edges from app background
+- 20-level undo history (also reflected in history panel)
 - Skip queue: skipped files reappear after all others are processed
 - Multilingual support (Korean, Chinese, Japanese) via automatic system font detection
 - Cross-platform (Linux, macOS, Windows)
@@ -33,6 +35,7 @@ Pre-built binaries for Linux, macOS (Intel + Apple Silicon), and Windows are ava
 | New folder | `Ctrl+N` |
 | Open folder | `Ctrl+O` |
 | Toggle keybinding editor | `Ctrl+K` |
+| Toggle history panel | `Ctrl+H` |
 
 All bindings can be remapped via the keybinding editor (`Ctrl+K`).
 
@@ -69,23 +72,27 @@ cargo build --release
 6. Press `Ctrl+N` to create a new subfolder (it gets the next available key automatically)
 7. Press `Ctrl+O` to open a different folder
 8. Press `Ctrl+K` to open the keybinding editor
-9. When all files are categorized, a completion screen is shown
+9. Press `Ctrl+H` to toggle the history panel (shows thumbnails of moved files)
+10. When all files are categorized, a completion screen is shown
 
 ## Layout
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ [Ctrl+O] 📂 Open folder…  [Ctrl+K] ⚙  file 12/47  │
-├──────────────────────────────┬──────────────────────┤
-│                              │ photo_001.jpg        │
-│                              │ 2.3 MB               │
-│      Image / text preview    │ ─────────────────    │
-│      (scales to fit)         │ [1] 📁 animals       │
-│                              │ [2] 📁 cars           │
-│                              │ [3] 📁 food           │
-│                              │ [4] 📁 people         │
-│                              │ ─────────────────    │
-│                              │ [S]  ⏭ Skip          │
-│                              │ [Ctrl+Z] ↩ Undo      │
-└──────────────────────────────┴──────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ [Ctrl+O] 📂 Open  [Ctrl+K] ⚙  [Ctrl+H] 📜  file 12/47     │
+├───────────────────────────────────┬──────────────────────────┤
+│                                   │ photo_001.jpg            │
+│                                   │ 2.3 MB                   │
+│    ┌─────────────────────────┐    │ ─────────────────        │
+│    │ Image / text preview    │    │ [1] 📁 animals           │
+│    │ (yellow border outline) │    │ [2] 📁 cars              │
+│    └─────────────────────────┘    │ [3] 📁 food              │
+│                                   │ [4] 📁 people            │
+│                                   │ ─────────────────        │
+│                                   │ [S]  ⏭ Skip              │
+│                                   │ [Ctrl+Z] ↩ Undo          │
+├───────────────────────────────────┴──────────────────────────┤
+│ 📜 History (3)                                               │
+│ [thumb1] [thumb2] [thumb3]  ← horizontal scroll, resizable  │
+└──────────────────────────────────────────────────────────────┘
 ```

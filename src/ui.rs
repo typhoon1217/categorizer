@@ -173,10 +173,19 @@ fn render_preview(app: &mut App, ui: &mut egui::Ui, ctx: &Context) {
         crate::app::FileView::Image(texture) => {
             let size = texture.size_vec2();
             let available = ui.available_size();
-            let scale = (available.x / size.x).min(available.y / size.y).min(1.0);
+            let border = 2.0;
+            let padded = egui::vec2(available.x - border * 2.0, available.y - border * 2.0);
+            let scale = (padded.x / size.x).min(padded.y / size.y).min(1.0);
             let display_size = size * scale;
             ui.centered_and_justified(|ui| {
-                ui.image((texture.id(), display_size));
+                let (rect, _) = ui.allocate_exact_size(
+                    display_size + egui::vec2(border * 2.0, border * 2.0),
+                    egui::Sense::hover(),
+                );
+                let border_rect = egui::Rect::from_center_size(rect.center(), display_size + egui::vec2(border * 2.0, border * 2.0));
+                ui.painter().rect_stroke(border_rect, 0.0, egui::Stroke::new(border, Color32::YELLOW));
+                let img_rect = egui::Rect::from_center_size(rect.center(), display_size);
+                ui.painter().image(texture.id(), img_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
             });
         }
         crate::app::FileView::Text(text) => {

@@ -20,6 +20,7 @@ pub struct Keymap {
     pub new_folder: KeyBind,
     pub open_folder: KeyBind,
     pub toggle_keybindings: KeyBind,
+    pub toggle_history: KeyBind,
 }
 
 /// Which binding the user is currently remapping.
@@ -31,6 +32,7 @@ pub enum BindTarget {
     NewFolder,
     OpenFolder,
     ToggleKeybindings,
+    ToggleHistory,
 }
 
 /// Per-folder key bindings — stored at <folder>/.categorizer-keys.json
@@ -64,6 +66,11 @@ impl Default for Keymap {
                 key: egui::Key::K,
                 modifiers: Modifiers::CTRL,
                 label: "Ctrl+K".to_string(),
+            },
+            toggle_history: KeyBind {
+                key: egui::Key::H,
+                modifiers: Modifiers::CTRL,
+                label: "Ctrl+H".to_string(),
             },
         }
     }
@@ -151,6 +158,13 @@ impl Keymap {
         {
             return Some("Toggle keybindings".to_string());
         }
+        // Check toggle_history
+        if self.toggle_history.key == key
+            && mods_equal(self.toggle_history.modifiers, modifiers)
+            && exclude != Some(&BindTarget::ToggleHistory)
+        {
+            return Some("Toggle history".to_string());
+        }
         None
     }
 
@@ -162,6 +176,7 @@ impl Keymap {
             (self.new_folder.key, self.new_folder.modifiers),
             (self.open_folder.key, self.open_folder.modifiers),
             (self.toggle_keybindings.key, self.toggle_keybindings.modifiers),
+            (self.toggle_history.key, self.toggle_history.modifiers),
         ]
     }
 }

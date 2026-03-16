@@ -19,6 +19,10 @@ pub fn render(app: &mut App, ctx: &Context) {
                 app.show_keymap_editor = !app.show_keymap_editor;
                 app.listening_bind = None;
             }
+            let hist_label = format!("[{}] 📜 History", app.keymap.toggle_history.label);
+            if ui.button(hist_label).clicked() {
+                app.show_history = !app.show_history;
+            }
             ui.separator();
             ui.label(format!("{}", app.folder.display()));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -45,6 +49,11 @@ pub fn render(app: &mut App, ctx: &Context) {
     // New folder popup
     if app.show_new_folder_popup {
         render_new_folder_popup(app, ctx);
+    }
+
+    // History panel
+    if app.show_history {
+        render_history_panel(app, ctx);
     }
 
     // Central image/preview panel
@@ -312,6 +321,7 @@ fn handle_keyboard(app: &mut App, ctx: &Context) {
                             BindTarget::NewFolder => app.keymap.new_folder = bind,
                             BindTarget::OpenFolder => app.keymap.open_folder = bind,
                             BindTarget::ToggleKeybindings => app.keymap.toggle_keybindings = bind,
+                            BindTarget::ToggleHistory => app.keymap.toggle_history = bind,
                         }
                         if !matches!(&target, BindTarget::Category(_)) {
                             if let Err(e) = app.keymap.save() {
@@ -385,6 +395,14 @@ fn handle_keyboard(app: &mut App, ctx: &Context) {
         {
             app.show_keymap_editor = !app.show_keymap_editor;
             app.listening_bind = None;
+            return;
+        }
+
+        // Toggle history
+        if i.key_pressed(app.keymap.toggle_history.key)
+            && mods_match(i.modifiers, app.keymap.toggle_history.modifiers)
+        {
+            app.show_history = !app.show_history;
         }
     });
 }
@@ -459,6 +477,118 @@ fn render_new_folder_popup(app: &mut App, ctx: &Context) {
     });
 }
 
+fn render_history_panel(app: &mut App, ctx: &Context) {
+    const THUMB_MAX: f32 = 256.0;
+    const LABEL_HEIGHT: f32 = 30.0;
+
+    // Load thumbnails at max resolution; we scale at render time
+    while app.history_thumbs.len() < app.move_log.len() {
+        let idx = app.history_thumbs.len();
+        let op = &app.move_log[idx];
+        let thumb = if crate::files::is_image(&op.to) {
+            load_thumbnail(&op.to, ctx, THUMB_MAX).ok()
+        } else {
+            None
+        };
+        app.history_thumbs.push(thumb);
+    }
+
+    egui::TopBottomPanel::bottom("history_panel")
+        .resizable(true)
+        .min_height(80.0)
+        .max_height(400.0)
+        .default_height(140.0)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("📜 History").strong().size(12.0));
+                ui.label(
+                    RichText::new(format!("({})", app.move_log.len()))
+                        .weak()
+                        .size(11.0),
+                );
+            });
+            let avail_h = ui.available_height();
+            let img_h = (avail_h - LABEL_HEIGHT).max(32.0);
+
+            if app.move_log.is_empty() {
+                ui.colored_label(Color32::GRAY, "No moves yet.");
+                // Fill remaining space so panel doesn't auto-shrink
+                let rem = ui.available_size();
+                ui.allocate_space(rem);
+            } else {
+                let scroll_h = avail_h;
+                egui::ScrollArea::horizontal()
+                    .id_source("history_hscroll")
+                    .stick_to_right(true)
+                    .min_scrolled_height(scroll_h)
+                    .show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            ui.set_min_height(scroll_h);
+                            for (i, op) in app.move_log.iter().enumerate() {
+                                let filename = op.from.file_name().unwrap_or_default().to_string_lossy();
+                                let dest_dir = op.to.parent()
+                                    .and_then(|p| p.file_name())
+                                    .unwrap_or_default()
+                                    .to_string_lossy();
+
+                                ui.vertical(|ui| {
+                                    // Thumbnail or icon — sized to fit panel height
+                                    if let Some(Some(tex)) = app.history_thumbs.get(i) {
+                                        let size = tex.size_vec2();
+                                        let scale = (img_h / size.y).min(img_h / size.x).min(1.0);
+                                        let display = size * scale;
+                                        ui.set_width(display.x.max(50.0));
+                                        ui.image((tex.id(), display));
+                                    } else {
+                                        ui.set_width(img_h.max(50.0));
+                                        let icon_size = (img_h * 0.5).min(48.0);
+                                        let (icon, _) = file_icon_and_size(&op.to);
+                                        ui.centered_and_justified(|ui| {
+                                            ui.label(RichText::new(icon).size(icon_size));
+                                        });
+                                    }
+                                    // Folder label
+                                    ui.label(
+                                        RichText::new(truncate_str(&dest_dir, 12))
+                                            .color(Color32::LIGHT_BLUE)
+                                            .size(10.0),
+                                    );
+                                    // Filename
+                                    ui.label(
+                                        RichText::new(truncate_str(&filename, 12))
+                                            .weak()
+                                            .size(9.0),
+                                    );
+                                });
+                                ui.add_space(4.0);
+                            }
+                        });
+                    });
+            }
+        });
+}
+
+fn load_thumbnail(path: &std::path::Path, ctx: &Context, max_dim: f32) -> Result<egui::TextureHandle, image::ImageError> {
+    let img = image::open(path)?;
+    let thumb = img.thumbnail(max_dim as u32, max_dim as u32).to_rgba8();
+    let (w, h) = thumb.dimensions();
+    let pixels = thumb.into_raw();
+    let color_image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &pixels);
+    Ok(ctx.load_texture(
+        format!("thumb_{}", path.display()),
+        color_image,
+        egui::TextureOptions::default(),
+    ))
+}
+
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max - 1])
+    }
+}
+
 fn render_keymap_editor(app: &mut App, ctx: &Context) {
     let mut open = app.show_keymap_editor;
     egui::Window::new("Keybindings")
@@ -526,6 +656,7 @@ fn render_keymap_editor(app: &mut App, ctx: &Context) {
                     render_global_bind_row(ui, app, BindTarget::NewFolder, "📁+ New folder", &app.keymap.new_folder.label.clone());
                     render_global_bind_row(ui, app, BindTarget::OpenFolder, "📂 Open folder", &app.keymap.open_folder.label.clone());
                     render_global_bind_row(ui, app, BindTarget::ToggleKeybindings, "⚙ Keybindings", &app.keymap.toggle_keybindings.label.clone());
+                    render_global_bind_row(ui, app, BindTarget::ToggleHistory, "📜 History", &app.keymap.toggle_history.label.clone());
                 });
 
             ui.separator();

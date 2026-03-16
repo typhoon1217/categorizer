@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use egui::TextureHandle;
-use crate::history::UndoStack;
+use crate::history::{MoveOp, UndoStack};
 use crate::keymap::{BindTarget, FolderBindings, Keymap};
 
 const UNDO_CAPACITY: usize = 20;
@@ -31,6 +31,9 @@ pub struct App {
     pub show_new_folder_popup: bool,
     pub new_folder_name: String,
     pub new_folder_error: Option<String>,
+    pub move_log: Vec<MoveOp>,
+    pub show_history: bool,
+    pub history_thumbs: Vec<Option<egui::TextureHandle>>,
 }
 
 impl App {
@@ -58,6 +61,9 @@ impl App {
             show_new_folder_popup: false,
             new_folder_name: String::new(),
             new_folder_error: None,
+            move_log: Vec::new(),
+            show_history: false,
+            history_thumbs: Vec::new(),
         })
     }
 
@@ -99,10 +105,12 @@ impl App {
         };
         let new_path = crate::files::move_file(&src, dest_dir)
             .map_err(|e| format!("Move failed: {e}"))?;
-        self.history.push(crate::history::MoveOp {
+        let op = MoveOp {
             from: src.clone(),
             to: new_path,
-        });
+        };
+        self.history.push(op.clone());
+        self.move_log.push(op);
         self.remove_current();
         self.status_message = None;
         Ok(())
@@ -124,6 +132,13 @@ impl App {
         };
         crate::files::move_file(&op.to, op.from.parent().unwrap_or_else(|| &self.folder))
             .map_err(|e| format!("Undo failed: {e}"))?;
+        // Remove from move_log and thumb cache
+        if let Some(pos) = self.move_log.iter().rposition(|m| m.from == op.from && m.to == op.to) {
+            self.move_log.remove(pos);
+            if pos < self.history_thumbs.len() {
+                self.history_thumbs.remove(pos);
+            }
+        }
         // Reinsert the file at current position
         self.files.insert(self.current_idx, op.from);
         self.file_view = FileView::Loading;
